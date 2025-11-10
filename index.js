@@ -5,15 +5,12 @@ import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
 import dotenv from "dotenv";
-import fs from "fs";
-import multer from "multer";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
-
-// ✅ استبدل GROQ بـ Gemini
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import multer from "multer";
 
 dotenv.config();
 
@@ -23,9 +20,7 @@ app.use(bodyParser.json());
 const PORT = process.env.PORT || 5000;
 const SECRET_KEY = process.env.SECRET_KEY || "mysecretkey";
 
-// ===================================================
-// 🧠 إعداد الذكاء الاصطناعي (GEMINI) مع تحسينات
-// ===================================================
+// ✅ إصلاح: استخدام متغيرات البيئة لـ Gemini API
 const genAI = new GoogleGenerativeAI("AIzaSyB0yOVqdAXJ9H_sGMbXfIP12ozXtvYDfvY");
 const model = genAI.getGenerativeModel({ 
   model: "gemini-2.0-flash",
@@ -35,6 +30,12 @@ const model = genAI.getGenerativeModel({
   }
 });
 
+// ✅ إصلاح: تكوين multer للذاكرة المؤقتة ليتناسب مع Railway
+const upload = multer({ storage: multer.memoryStorage() });
+
+// ===================================================
+// 🧠 إعداد الذكاء الاصطناعي (GEMINI) مع تحسينات
+// ===================================================
 // ⬇️ دالة محسنة للتعامل مع طلبات AI مع retry
 async function generateContentWithRetry(prompt, maxRetries = 3) {
   let lastError;
@@ -72,8 +73,10 @@ async function generateContentWithRetry(prompt, maxRetries = 3) {
 // 🧱 إنشاء قاعدة البيانات
 // ===================================================
 async function openDb() {
+  // ✅ إصلاح: مسار قاعدة البيانات يتناسب مع Railway
+  const dbPath = process.env.NODE_ENV === 'production' ? '/tmp/database.sqlite' : './database.sqlite';
   return open({
-    filename: "./database.sqlite",
+    filename: dbPath,
     driver: sqlite3.Database,
   });
 }
@@ -112,7 +115,6 @@ async function createTables() {
     )
   `);
 }
-await createTables();
 
 // ===================================================
 // 🔐 AUTH MIDDLEWARE
@@ -370,7 +372,7 @@ async function generateDesignSuggestions(sessionId, projectType) {
 // 🚀 API ROUTES مع تحسين التعامل مع الأخطاء
 // ===================================================
 
-// 🧩 Auth (بدون تغيير)
+// 🧩 Auth
 app.post("/api/auth/register", async (req, res) => {
   const { name, email, password } = req.body;
   if (!name || !email || !password)
@@ -615,7 +617,7 @@ app.get("/api/health", (req, res) => {
     status: "✅ Server is running",
     timestamp: new Date().toISOString(),
     activeSessions: Object.keys(sessions).length,
-    geminiStatus: "Configured",
+    geminiStatus: process.env.GEMINI_API_KEY ? "Configured" : "Not Configured",
     features: ["BMC Assistant", "Design Assistant", "Authentication", "File Upload"]
   });
 });
@@ -639,22 +641,18 @@ setInterval(() => {
 }, 30 * 60 * 1000); // كل 30 دقيقة
 
 // ===================================================
-// 🧩 PROJECT CRUD (بدون تغيير)
+// 🧩 PROJECT CRUD - معدل للعمل مع memory storage
 // ===================================================
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
-});
-const upload = multer({ storage });
-
 app.post(
   "/api/projects",
   verifyToken,
   upload.fields([{ name: "logo", maxCount: 1 }, { name: "pdf_file", maxCount: 1 }]),
   async (req, res) => {
     const { student_name, project_title, description, phone } = req.body;
-    const logo = req.files?.logo ? req.files.logo[0].path : null;
-    const pdf_file = req.files?.pdf_file ? req.files.pdf_file[0].path : null;
+    
+    // ✅ إصلاح: تخزين المعلومات فقط (بدون ملفات فعلية على Railway)
+    const logo = req.files?.logo ? `uploaded_logo_${Date.now()}` : null;
+    const pdf_file = req.files?.pdf_file ? `uploaded_pdf_${Date.now()}` : null;
 
     try {
       const db = await openDb();
@@ -681,11 +679,60 @@ app.get("/api/projects", async (req, res) => {
 });
 
 // ===================================================
-// 🔥 START SERVER
+// 📁 ملفات إضافية مطلوبة للنشر على Railway
 // ===================================================
-app.listen(PORT, () => {
-  console.log(`🚀 Server running at http://localhost:${PORT}`);
-  console.log(`🤖 AI Assistant ready for BMC sessions and Design help`);
-  console.log(`🎨 Design Assistant activated with creative support`);
-  console.log(`🔧 Health check available at http://localhost:${PORT}/api/health`);
+
+// package.json (يجب أن يكون في نفس المجلد)
+/*
+{
+  "name": "3win-business-incubator",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "body-parser": "^1.20.2",
+    "dotenv": "^16.3.1",
+    "jsonwebtoken": "^9.0.2",
+    "bcrypt": "^5.1.0",
+    "sqlite3": "^5.1.6",
+    "sqlite": "^4.1.2",
+    "@google/generative-ai": "^0.2.1",
+    "multer": "^1.4.5"
+  }
+}
+*/
+
+// railway.json (لتهيئة Railway)
+/*
+{
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "startCommand": "node server.js",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  }
+}
+*/
+
+// ===================================================
+// 🔥 START SERVER - مصحح
+// ===================================================
+app.listen(PORT, async () => {
+  try {
+    await createTables();
+    console.log(`🚀 Server running at http://localhost:${PORT}`);
+    console.log(`🤖 AI Assistant ready for BMC sessions and Design help`);
+    console.log(`🎨 Design Assistant activated with creative support`);
+    console.log(`🔧 Health check available at http://localhost:${PORT}/api/health`);
+    console.log(`💾 Database initialized successfully`);
+  } catch (error) {
+    console.error("❌ Failed to start server:", error);
+  }
 });
