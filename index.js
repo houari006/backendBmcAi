@@ -721,6 +721,82 @@ app.get("/api/projects", async (req, res) => {
 }
 */
 
+
+// 🆕 مسار لجلب جميع المشاريع
+app.get("/api/projects", async (req, res) => {
+  try {
+    const db = await openDb();
+    const projects = await db.all("SELECT * FROM projects ORDER BY created_at DESC");
+    res.json(projects);
+  } catch (error) {
+    console.error("Error fetching projects:", error);
+    res.status(500).json({ message: "Error fetching projects" });
+  }
+});
+
+// 🆕 مسار لجلب مشروع محدد
+app.get("/api/projects/:id", async (req, res) => {
+  try {
+    const db = await openDb();
+    const project = await db.get("SELECT * FROM projects WHERE id = ?", [req.params.id]);
+    
+    if (!project) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+    
+    res.json(project);
+  } catch (error) {
+    console.error("Error fetching project:", error);
+    res.status(500).json({ message: "Error fetching project" });
+  }
+});
+
+// 🆕 مسار لحذف مشروع
+app.delete("/api/projects/:id", verifyToken, async (req, res) => {
+  try {
+    const db = await openDb();
+    const result = await db.run("DELETE FROM projects WHERE id = ?", [req.params.id]);
+    
+    if (result.changes === 0) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+    
+    res.json({ message: "✅ Project deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting project:", error);
+    res.status(500).json({ message: "Error deleting project" });
+  }
+});
+
+// 🆕 مسار لجلب سجل التصميمات
+app.get("/api/designs", verifyToken, async (req, res) => {
+  try {
+    const db = await openDb();
+    const designs = await db.all("SELECT * FROM designs ORDER BY created_at DESC");
+    res.json(designs);
+  } catch (error) {
+    console.error("Error fetching designs:", error);
+    res.status(500).json({ message: "Error fetching designs" });
+  }
+});
+
+// 🆕 مسار لحذف تصميم
+app.delete("/api/designs/:id", verifyToken, async (req, res) => {
+  try {
+    const db = await openDb();
+    const result = await db.run("DELETE FROM designs WHERE id = ?", [req.params.id]);
+    
+    if (result.changes === 0) {
+      return res.status(404).json({ message: "Design not found" });
+    }
+    
+    res.json({ message: "✅ Design deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting design:", error);
+    res.status(500).json({ message: "Error deleting design" });
+  }
+});
+
 // ===================================================
 // 🔥 START SERVER - مصحح
 // ===================================================
