@@ -622,26 +622,8 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// 🆕 تنظيف الجلسات القديمة تلقائياً
-setInterval(() => {
-  const now = new Date();
-  const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
-  
-  let cleanedCount = 0;
-  Object.keys(sessions).forEach(sessionId => {
-    if (sessions[sessionId].createdAt < twoHoursAgo) {
-      delete sessions[sessionId];
-      cleanedCount++;
-    }
-  });
-  
-  if (cleanedCount > 0) {
-    console.log(`🧹 تم تنظيف ${cleanedCount} جلسة منتهية الصلاحية`);
-  }
-}, 30 * 60 * 1000); // كل 30 دقيقة
-
 // ===================================================
-// 🧩 PROJECT CRUD - معدل للعمل مع memory storage
+// 🧩 PROJECT CRUD - بدون مصادقة للحذف
 // ===================================================
 app.post(
   "/api/projects",
@@ -668,61 +650,7 @@ app.post(
   }
 );
 
-app.get("/api/projects", async (req, res) => {
-  try {
-    const db = await openDb();
-    const projects = await db.all("SELECT * FROM projects ORDER BY created_at DESC");
-    res.json(projects);
-  } catch {
-    res.status(500).json({ message: "Error fetching projects" });
-  }
-});
-
-// ===================================================
-// 📁 ملفات إضافية مطلوبة للنشر على Railway
-// ===================================================
-
-// package.json (يجب أن يكون في نفس المجلد)
-/*
-{
-  "name": "3win-business-incubator",
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "body-parser": "^1.20.2",
-    "dotenv": "^16.3.1",
-    "jsonwebtoken": "^9.0.2",
-    "bcrypt": "^5.1.0",
-    "sqlite3": "^5.1.6",
-    "sqlite": "^4.1.2",
-    "@google/generative-ai": "^0.2.1",
-    "multer": "^1.4.5"
-  }
-}
-*/
-
-// railway.json (لتهيئة Railway)
-/*
-{
-  "build": {
-    "builder": "NIXPACKS"
-  },
-  "deploy": {
-    "startCommand": "node server.js",
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10
-  }
-}
-*/
-
-
-// 🆕 مسار لجلب جميع المشاريع
+// 🆕 مسار لجلب جميع المشاريع - بدون مصادقة
 app.get("/api/projects", async (req, res) => {
   try {
     const db = await openDb();
@@ -734,7 +662,7 @@ app.get("/api/projects", async (req, res) => {
   }
 });
 
-// 🆕 مسار لجلب مشروع محدد
+// 🆕 مسار لجلب مشروع محدد - بدون مصادقة
 app.get("/api/projects/:id", async (req, res) => {
   try {
     const db = await openDb();
@@ -751,8 +679,8 @@ app.get("/api/projects/:id", async (req, res) => {
   }
 });
 
-// 🆕 مسار لحذف مشروع
-app.delete("/api/projects/:id", verifyToken, async (req, res) => {
+// 🆕 مسار لحذف مشروع - بدون مصادقة ✅ التعديل هنا
+app.delete("/api/projects/:id", async (req, res) => {
   try {
     const db = await openDb();
     const result = await db.run("DELETE FROM projects WHERE id = ?", [req.params.id]);
@@ -768,8 +696,8 @@ app.delete("/api/projects/:id", verifyToken, async (req, res) => {
   }
 });
 
-// 🆕 مسار لجلب سجل التصميمات
-app.get("/api/designs", verifyToken, async (req, res) => {
+// 🆕 مسار لجلب سجل التصميمات - بدون مصادقة ✅ التعديل هنا
+app.get("/api/designs", async (req, res) => {
   try {
     const db = await openDb();
     const designs = await db.all("SELECT * FROM designs ORDER BY created_at DESC");
@@ -780,8 +708,8 @@ app.get("/api/designs", verifyToken, async (req, res) => {
   }
 });
 
-// 🆕 مسار لحذف تصميم
-app.delete("/api/designs/:id", verifyToken, async (req, res) => {
+// 🆕 مسار لحذف تصميم - بدون مصادقة ✅ التعديل هنا
+app.delete("/api/designs/:id", async (req, res) => {
   try {
     const db = await openDb();
     const result = await db.run("DELETE FROM designs WHERE id = ?", [req.params.id]);
@@ -796,6 +724,24 @@ app.delete("/api/designs/:id", verifyToken, async (req, res) => {
     res.status(500).json({ message: "Error deleting design" });
   }
 });
+
+// 🆕 تنظيف الجلسات القديمة تلقائياً
+setInterval(() => {
+  const now = new Date();
+  const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+  
+  let cleanedCount = 0;
+  Object.keys(sessions).forEach(sessionId => {
+    if (sessions[sessionId].createdAt < twoHoursAgo) {
+      delete sessions[sessionId];
+      cleanedCount++;
+    }
+  });
+  
+  if (cleanedCount > 0) {
+    console.log(`🧹 تم تنظيف ${cleanedCount} جلسة منتهية الصلاحية`);
+  }
+}, 30 * 60 * 1000); // كل 30 دقيقة
 
 // ===================================================
 // 🔥 START SERVER - مصحح
