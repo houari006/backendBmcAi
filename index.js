@@ -743,6 +743,109 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000); // كل 30 دقيقة
 
+// this is know test dwonload pdf and logo 
+// 🆕 مسارات لتحميل الملفات
+app.get("/api/files/:filename", async (req, res) => {
+  const { filename } = req.params;
+  
+  try {
+    // في بيئة الإنتاج، قد تحتاج لتعديل هذا المسار ليناسب تخزين Railway
+    const filePath = process.env.NODE_ENV === 'production' 
+      ? `/tmp/uploads/${filename}`
+      : `./uploads/${filename}`;
+    
+    // إرسال الملف كـ blob
+    res.sendFile(filePath, { root: '.' }, (err) => {
+      if (err) {
+        console.error('Error sending file:', err);
+        
+        // إذا لم يوجد الملف، أرسل ملف تجريبي
+        if (err.code === 'ENOENT') {
+          if (filename.includes('pdf')) {
+            // إنشاء PDF تجريبي
+            const PDFDocument = require('pdfkit');
+            const doc = new PDFDocument();
+            
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            
+            doc.pipe(res);
+            doc.fontSize(20).text(`ملف BMC - ${filename}`, 100, 100);
+            doc.fontSize(12).text(`المشروع: ${filename.replace('uploaded_pdf_', '')}`, 100, 150);
+            doc.text(`تاريخ الإنشاء: ${new Date().toLocaleDateString('ar-EG')}`, 100, 180);
+            doc.text('هذا ملف BMC تجريبي للمشروع', 100, 210);
+            doc.end();
+          } else {
+            // إنشاء صورة تجريبية
+            const canvas = require('canvas');
+            const c = canvas.createCanvas(400, 300);
+            const ctx = c.getContext('2d');
+            
+            // خلفية متدرجة
+            const gradient = ctx.createLinearGradient(0, 0, 400, 300);
+            gradient.addColorStop(0, '#3498db');
+            gradient.addColorStop(1, '#2c3e50');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 400, 300);
+            
+            // نص
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('تصميم UI/UX', 200, 120);
+            ctx.font = '16px Arial';
+            ctx.fillText(filename, 200, 160);
+            ctx.fillText('نموذج تجريبي', 200, 190);
+            
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            c.createPNGStream().pipe(res);
+          }
+        } else {
+          res.status(404).json({ error: 'File not found' });
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error in file download:', error);
+    res.status(500).json({ error: 'Failed to download file' });
+  }
+});
+
+// 🆕 مسار لتحميل ملفات المشاريع
+app.get("/api/projects/:id/files/:filetype", async (req, res) => {
+  const { id, filetype } = req.params;
+  
+  try {
+    const db = await openDb();
+    const project = await db.get("SELECT * FROM projects WHERE id = ?", [id]);
+    
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+    
+    let filename;
+    if (filetype === 'logo') {
+      filename = project.logo;
+    } else if (filetype === 'pdf') {
+      filename = project.pdf_file;
+    } else {
+      return res.status(400).json({ error: 'Invalid file type' });
+    }
+    
+    if (!filename) {
+      return res.status(404).json({ error: 'File not found for this project' });
+    }
+    
+    // توجيه إلى مسار تحميل الملف
+    res.redirect(`/api/files/${filename}`);
+    
+  } catch (error) {
+    console.error('Error fetching project file:', error);
+    res.status(500).json({ error: 'Failed to fetch file' });
+  }
+});
+
 // ===================================================
 // 🔥 START SERVER - مصحح
 // ===================================================
