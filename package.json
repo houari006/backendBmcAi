@@ -20,9 +20,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
     "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7",
-    "pdfkit": "^0.14.0",
-     "cloudinary": "^1.41.0"
+    "sqlite3": "^5.1.7"
   }
 }
 
