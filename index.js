@@ -1,16 +1,16 @@
 // ===================================================
 // 🌐 IMPORTS & INITIAL SETUP
 // ===================================================
-import express from "express";
-import cors from "cors";
-import bodyParser from "body-parser";
-import dotenv from "dotenv";
-import jwt from "jsonwebtoken";
-import bcrypt from "bcrypt";
-import sqlite3 from "sqlite3";
-import { open } from "sqlite";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import multer from "multer";
+const express = require("express");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+const dotenv = require("dotenv");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
+const sqlite3 = require("sqlite3");
+const { open } = require("sqlite");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+const multer = require("multer");
 
 dotenv.config();
 
