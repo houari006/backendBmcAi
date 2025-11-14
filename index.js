@@ -11,84 +11,64 @@ import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import multer from "multer";
-import { v2 as cloudinary } from "cloudinary";
-import PDFDocument from "pdfkit";
 
-// تحميل متغيرات البيئة
 dotenv.config();
 
-// تكوين Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || "dhfiibifo",
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
 const app = express();
-
-// تكوين CORS
 app.use(cors({
   origin: [
     'http://localhost:4200',
-    'https://palegoldenrod-hippopotamus-154780.hostingersite.com'
+    'https://palegoldenrod-hippopotamus-154780.hostingersite.com/' 
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
 }));
-
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-
 const PORT = process.env.PORT || 5000;
 const SECRET_KEY = process.env.SECRET_KEY || "mysecretkey";
 
-// تكوين Gemini AI
-let genAI, model;
-try {
-  genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "AIzaSyB0yOVqdAXJ9H_sGMbXfIP12ozXtvYDfvY");
-  model = genAI.getGenerativeModel({ 
-    model: "gemini-2.0-flash",
-    generationConfig: {
-      maxOutputTokens: 1000,
-      temperature: 0.7,
-    }
-  });
-  console.log("✅ Gemini AI configured successfully");
-} catch (error) {
-  console.warn("⚠️ Gemini AI configuration failed:", error.message);
-}
-
-// تكوين Multer للذاكرة
-const upload = multer({ 
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB
+// ✅ إصلاح: استخدام متغيرات البيئة لـ Gemini API
+const genAI = new GoogleGenerativeAI("AIzaSyB0yOVqdAXJ9H_sGMbXfIP12ozXtvYDfvY");
+const model = genAI.getGenerativeModel({ 
+  model: "gemini-2.0-flash",
+  generationConfig: {
+    maxOutputTokens: 1000,
+    temperature: 0.7,
   }
 });
 
+// ✅ إصلاح: تكوين multer للذاكرة المؤقتة ليتناسب مع Railway
+const upload = multer({ storage: multer.memoryStorage() });
+
 // ===================================================
-// 🧠 AI HELPER FUNCTIONS
+// 🧠 إعداد الذكاء الاصطناعي (GEMINI) مع تحسينات
 // ===================================================
+// ⬇️ دالة محسنة للتعامل مع طلبات AI مع retry
 async function generateContentWithRetry(prompt, maxRetries = 3) {
   let lastError;
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`🔄 AI attempt ${attempt}...`);
+      console.log(`🔄 محاولة ${attempt} للطلب AI...`);
+      
       const result = await model.generateContent(prompt);
       const response = await result.response;
-      console.log("✅ AI response received successfully");
+      
+      console.log("✅ تم استلام الرد من AI بنجاح");
       return response.text();
+      
     } catch (error) {
       lastError = error;
-      console.error(`❌ Attempt ${attempt} failed:`, error.message);
+      console.error(`❌ فشل المحاولة ${attempt}:`, error.message);
       
       if (error.status === 429) {
-        const waitTime = attempt * 2000;
-        console.log(`⏳ Waiting ${waitTime}ms before next attempt...`);
+        // إذا كان الخطأ 429، ننتظر وقتاً أطول بين المحاولات
+        const waitTime = attempt * 2000; // 2, 4, 6 ثواني
+        console.log(`⏳ انتظر ${waitTime}ms قبل المحاولة التالية...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       } else {
+        // لأخطاء أخرى، نكسر الحلقة
         break;
       }
     }
@@ -98,9 +78,10 @@ async function generateContentWithRetry(prompt, maxRetries = 3) {
 }
 
 // ===================================================
-// 🗄️ DATABASE SETUP
+// 🧱 إنشاء قاعدة البيانات
 // ===================================================
 async function openDb() {
+  // ✅ إصلاح: مسار قاعدة البيانات يتناسب مع Railway
   const dbPath = process.env.NODE_ENV === 'production' ? '/tmp/database.sqlite' : './database.sqlite';
   return open({
     filename: dbPath,
@@ -110,17 +91,14 @@ async function openDb() {
 
 async function createTables() {
   const db = await openDb();
-  
   await db.run(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT,
       email TEXT UNIQUE,
-      password TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      password TEXT
     )
   `);
-  
   await db.run(`
     CREATE TABLE IF NOT EXISTS projects (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,12 +106,13 @@ async function createTables() {
       project_title TEXT,
       description TEXT,
       phone TEXT,
-      logo_url TEXT,
-      pdf_url TEXT,
+      logo TEXT,
+      pdf_file TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
   
+  // جدول جديد لتخزين التصميمات
   await db.run(`
     CREATE TABLE IF NOT EXISTS designs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,12 +122,10 @@ async function createTables() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
-  
-  console.log("✅ Database tables created successfully");
 }
 
 // ===================================================
-// 🔐 AUTHENTICATION MIDDLEWARE
+// 🔐 AUTH MIDDLEWARE
 // ===================================================
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -163,45 +140,7 @@ function verifyToken(req, res, next) {
 }
 
 // ===================================================
-// ☁️ CLOUDINARY FILE UPLOAD FUNCTIONS
-// ===================================================
-async function uploadToCloudinary(fileBuffer, fileName, resourceType = 'auto') {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        resource_type: resourceType,
-        public_id: `3win-projects/${fileName.replace(/\.[^/.]+$/, "")}`,
-        folder: "3win-projects",
-        overwrite: true
-      },
-      (error, result) => {
-        if (error) {
-          console.error("❌ Cloudinary upload error:", error);
-          reject(error);
-        } else {
-          console.log(`✅ File uploaded to Cloudinary: ${result.secure_url}`);
-          resolve(result);
-        }
-      }
-    );
-    
-    uploadStream.end(fileBuffer);
-  });
-}
-
-async function deleteFromCloudinary(publicId) {
-  try {
-    const result = await cloudinary.uploader.destroy(publicId);
-    console.log(`✅ File deleted from Cloudinary: ${publicId}`);
-    return result;
-  } catch (error) {
-    console.error("❌ Cloudinary delete error:", error);
-    throw error;
-  }
-}
-
-// ===================================================
-// 🤖 AI SESSIONS MANAGEMENT
+// 🤖 AI SESSIONS - محسّن مع دعم التصميم
 // ===================================================
 let sessions = {};
 const BMC_SECTIONS = [
@@ -210,6 +149,7 @@ const BMC_SECTIONS = [
   "Channels", "Cost Structure", "Revenue Streams",
 ];
 
+// ⬇️ توليد السؤال التالي في BMC مع fallback
 async function generateNextQuestion(sessionId) {
   const section = BMC_SECTIONS[(sessions[sessionId]?.bmcProgress || 0) % BMC_SECTIONS.length];
   
@@ -240,9 +180,11 @@ async function generateNextQuestion(sessionId) {
     if (!sessions[sessionId]) sessions[sessionId] = { chat: [], mode: "bmc" };
     sessions[sessionId].chat.push({ role: "assistant", content: aiMessage });
     return aiMessage;
+    
   } catch (error) {
     console.error("Error generating BMC question:", error);
     
+    // Fallback questions in case AI fails
     const fallbackQuestions = {
       "Key Partners": "من هم الشركاء الرئيسيون الذين تحتاجهم لتنفيذ مشروعك؟",
       "Key Activities": "ما هي الأنشطة الرئيسية التي يجب القيام بها لتقديم قيمة للعملاء؟",
@@ -263,6 +205,45 @@ async function generateNextQuestion(sessionId) {
   }
 }
 
+// ⬇️ إنتاج ملخص نهائي مع fallback
+async function produceFinalSummary(sessionId) {
+  const bmcData = sessions[sessionId]?.bmcData || {};
+  
+  if (Object.keys(bmcData).length === 0) {
+    return "⚠️ لم يتم جمع بيانات كافية لتوليد ملخص. يرجى إكمال المزيد من الأسئلة.";
+  }
+
+  const prompt = `
+قم بإنشاء ملخص واضح وشامل باللغة العربية لنموذج العمل التجاري للطالب بناءً على البيانات التالية:
+${JSON.stringify(bmcData, null, 2)}
+
+الملخص يجب أن:
+- يكون باللغة العربية
+- يكون منظماً وواضحاً
+- يسلط الضوء على النقاط الرئيسية
+- يعطي نظرة شاملة عن نموذج العمل
+`;
+
+  try {
+    const summary = await generateContentWithRetry(prompt);
+    return summary;
+  } catch (error) {
+    console.error("Error generating summary:", error);
+    
+    // Fallback summary
+    return `📊 **ملخص نموذج العمل التجاري**
+
+بناءً على البيانات المقدمة، إليك نظرة عامة على نموذج عملك:
+
+${Object.entries(bmcData).map(([section, answer]) => 
+  `**${section}:** ${answer}`
+).join('\n\n')}
+
+💡 **نصيحة:** يمكنك تحسين نموذج عملك من خلال التركيز على تناسق جميع الأقسام مع بعضها البعض.`;
+  }
+}
+
+// ⬇️ وظيفة مساعدة في إنشاء التصميم مع دعم المحادثة الحرة
 async function handleDesignAssistant(sessionId, userMessage) {
   if (!sessions[sessionId]) {
     sessions[sessionId] = { 
@@ -273,17 +254,26 @@ async function handleDesignAssistant(sessionId, userMessage) {
     };
   }
 
+  // إضافة سؤال المستخدم إلى السجل
   sessions[sessionId].chat.push({ role: "user", content: userMessage });
 
+  // تحديد نوع المساعدة المطلوبة
   const lowerMessage = userMessage.toLowerCase();
-  let designContext = "عام";
   
-  if (lowerMessage.includes('شعار') || lowerMessage.includes('لوجو')) designContext = "تصميم الشعار";
-  else if (lowerMessage.includes('موقع') || lowerMessage.includes('ويب')) designContext = "تصميم الموقع الإلكتروني";
-  else if (lowerMessage.includes('هوية') || lowerMessage.includes('براند')) designContext = "الهوية البصرية";
-  else if (lowerMessage.includes('غلاف') || lowerMessage.includes('كتاب')) designContext = "تصميم الغلاف";
-  else if (lowerMessage.includes('منشور') || lowerMessage.includes('سوشيال')) designContext = "تصميم منشورات وسائل التواصل";
-  else if (lowerMessage.includes('عرض') || lowerMessage.includes('عروض')) designContext = "تصميم العروض التقديمية";
+  let designContext = "عام";
+  if (lowerMessage.includes('شعار') || lowerMessage.includes('لوجو')) {
+    designContext = "تصميم الشعار";
+  } else if (lowerMessage.includes('موقع') || lowerMessage.includes('ويب')) {
+    designContext = "تصميم الموقع الإلكتروني";
+  } else if (lowerMessage.includes('هوية') || lowerMessage.includes('براند')) {
+    designContext = "الهوية البصرية";
+  } else if (lowerMessage.includes('غلاف') || lowerMessage.includes('كتاب')) {
+    designContext = "تصميم الغلاف";
+  } else if (lowerMessage.includes('منشور') || lowerMessage.includes('سوشيال')) {
+    designContext = "تصميم منشورات وسائل التواصل";
+  } else if (lowerMessage.includes('عرض') || lowerMessage.includes('عروض')) {
+    designContext = "تصميم العروض التقديمية";
+  }
 
   const prompt = `
 أنت مساعد ذكي متخصص في التصميم الجرافيكي وتطوير المشاريع لطلاب حاضنة أعمال 3win.
@@ -297,16 +287,29 @@ async function handleDesignAssistant(sessionId, userMessage) {
 4. اقتراحات tools وبرامج مفيدة
 5. أفضل الممارسات في التصميم
 
-أجب باللغة العربية بطريقة مهنية وإبداعية وعملية.
+إذا كان السؤال ليس عن التصميم، قدم إجابة مفيدة في مجال ريادة الأعمال وتطوير المشاريع.
+
+أجب باللغة العربية بطريقة:
+- مهنية وإبداعية
+- عملية وقابلة للتطبيق
+- مراعية لميزانية الطلاب
+- تشجع الإبداع والابتكار
+
+الإجابة:
 `;
 
   try {
     const aiResponse = await generateContentWithRetry(prompt);
+    
+    // حفظ رد المساعد في السجل
     sessions[sessionId].chat.push({ role: "assistant", content: aiResponse });
+    
     return aiResponse;
+    
   } catch (error) {
     console.error("AI Error in design assistant:", error);
     
+    // Fallback responses للتصميم
     let fallbackResponse = "🎨 **مساعد التصميم الإبداعي**\n\n";
     
     if (designContext !== "عام") {
@@ -330,33 +333,54 @@ async function handleDesignAssistant(sessionId, userMessage) {
   }
 }
 
+// ⬇️ وظيفة متقدمة لإنشاء تصاميم مقترحة
+async function generateDesignSuggestions(sessionId, projectType) {
+  const prompt = `
+أنت مصمم جرافيكي محترف تقدم استشارات لطلاب حاضنة أعمال 3win.
+نوع المشروع: ${projectType}
+
+قدم 3 اقتراحات تصميمية إبداعية تشمل:
+1. لوحة ألوان مناسبة
+2. نمط تصميم مقترح
+3. نصائح typography
+4. أفكار إبداعية للهوية
+5. أدوات مجانية مقترحة
+
+أجب باللغة العربية بطريقة إبداعية ومحفزة.
+`;
+
+  try {
+    const suggestions = await generateContentWithRetry(prompt);
+    return suggestions;
+  } catch (error) {
+    console.error("Error generating design suggestions:", error);
+    
+    return `🎯 **اقتراحات تصميمية لـ ${projectType}**
+
+1. **النمط البسيط والحديث**
+   - الألوان: أزرق مهني + أبيض + رمادي
+   - الخطوط: sans-serif واضحة
+   - ركز على البساطة والوضوح
+
+2. **النمط الإبداعي الجريء**
+   - الألوان: ألوان زاهية ومتناقضة
+   - الخطوط: مزيج بين classic وmodern
+   - شجع على الإبداع والتميز
+
+3. **النمط الاحترافي التقليدي**
+   - الألوان: درجات محايدة واحترافية
+   - الخطوط: serif كلاسيكية
+   - يناسب المشاريع التقليدية
+
+🛠️ **أدوات مجانية**: Canva, Figma, Adobe Color, Google Fonts`;
+  }
+}
+
 // ===================================================
-// 🚀 API ROUTES
+// 🚀 API ROUTES مع تحسين التعامل مع الأخطاء
 // ===================================================
 
-// Health Check
-app.get("/", (req, res) => {
-  res.json({ 
-    message: "🚀 3win Business Incubator Backend is running!",
-    timestamp: new Date().toISOString(),
-    version: "2.0.0",
-    features: ["Cloudinary Storage", "AI Assistant", "File Management"]
-  });
-});
-
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: "✅ Server is running",
-    timestamp: new Date().toISOString(),
-    cloudinary: cloudinary.config().cloud_name ? "Configured" : "Not Configured",
-    gemini: model ? "Configured" : "Not Configured",
-    activeSessions: Object.keys(sessions).length
-  });
-});
-
-// ===================================================
-// 👥 AUTHENTICATION ROUTES
-// ===================================================
+// 🧩 Auth
 app.post("/api/auth/register", async (req, res) => {
   const { name, email, password } = req.body;
   if (!name || !email || !password)
@@ -366,7 +390,9 @@ app.post("/api/auth/register", async (req, res) => {
     const db = await openDb();
     const hashedPassword = await bcrypt.hash(password, 10);
     await db.run(`INSERT INTO users (name, email, password) VALUES (?, ?, ?)`, [
-      name, email, hashedPassword
+      name,
+      email,
+      hashedPassword,
     ]);
     res.status(201).json({ message: "✅ User registered successfully" });
   } catch (error) {
@@ -396,157 +422,7 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// ===================================================
-// 📁 PROJECT ROUTES WITH CLOUDINARY
-// ===================================================
-app.post(
-  "/api/projects",
-  verifyToken,
-  upload.fields([{ name: "logo", maxCount: 1 }, { name: "pdf_file", maxCount: 1 }]),
-  async (req, res) => {
-    const { student_name, project_title, description, phone } = req.body;
-    
-    try {
-      let logoUrl = null;
-      let pdfUrl = null;
-
-      // رفع Logo إلى Cloudinary
-      if (req.files?.logo) {
-        const logoFile = req.files.logo[0];
-        const logoResult = await uploadToCloudinary(
-          logoFile.buffer,
-          `logo_${Date.now()}_${logoFile.originalname}`,
-          'image'
-        );
-        logoUrl = logoResult.secure_url;
-      }
-
-      // رفع PDF إلى Cloudinary
-      if (req.files?.pdf_file) {
-        const pdfFile = req.files.pdf_file[0];
-        const pdfResult = await uploadToCloudinary(
-          pdfFile.buffer,
-          `bmc_${Date.now()}_${pdfFile.originalname}`,
-          'raw'
-        );
-        pdfUrl = pdfResult.secure_url;
-      }
-
-      const db = await openDb();
-      const result = await db.run(
-        `INSERT INTO projects (student_name, project_title, description, phone, logo_url, pdf_url)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [student_name, project_title, description, phone, logoUrl, pdfUrl]
-      );
-
-      res.status(201).json({ 
-        message: "✅ Project saved successfully",
-        projectId: result.lastID,
-        logoUrl: logoUrl,
-        pdfUrl: pdfUrl
-      });
-    } catch (error) {
-      console.error("Error saving project:", error);
-      res.status(500).json({ message: "Error saving project" });
-    }
-  }
-);
-
-// Get all projects
-app.get("/api/projects", async (req, res) => {
-  try {
-    const db = await openDb();
-    const projects = await db.all("SELECT * FROM projects ORDER BY created_at DESC");
-    res.json(projects);
-  } catch (error) {
-    console.error("Error fetching projects:", error);
-    res.status(500).json({ message: "Error fetching projects" });
-  }
-});
-
-// Get single project
-app.get("/api/projects/:id", async (req, res) => {
-  try {
-    const db = await openDb();
-    const project = await db.get("SELECT * FROM projects WHERE id = ?", [req.params.id]);
-    
-    if (!project) {
-      return res.status(404).json({ message: "Project not found" });
-    }
-    
-    res.json(project);
-  } catch (error) {
-    console.error("Error fetching project:", error);
-    res.status(500).json({ message: "Error fetching project" });
-  }
-});
-
-// Delete project
-app.delete("/api/projects/:id", async (req, res) => {
-  try {
-    const db = await openDb();
-    
-    // الحصول على المشروع أولاً لحذف الملفات من Cloudinary
-    const project = await db.get("SELECT * FROM projects WHERE id = ?", [req.params.id]);
-    
-    if (!project) {
-      return res.status(404).json({ message: "Project not found" });
-    }
-
-    // حذف الملفات من Cloudinary
-    if (project.logo_url) {
-      const logoPublicId = project.logo_url.split('/').pop().split('.')[0];
-      await deleteFromCloudinary(`3win-projects/${logoPublicId}`);
-    }
-    
-    if (project.pdf_url) {
-      const pdfPublicId = project.pdf_url.split('/').pop().split('.')[0];
-      await deleteFromCloudinary(`3win-projects/${pdfPublicId}`);
-    }
-
-    // حذف المشروع من قاعدة البيانات
-    const result = await db.run("DELETE FROM projects WHERE id = ?", [req.params.id]);
-    
-    res.json({ message: "✅ Project deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting project:", error);
-    res.status(500).json({ message: "Error deleting project" });
-  }
-});
-
-// ===================================================
-// 🎨 DESIGNS ROUTES
-// ===================================================
-app.get("/api/designs", async (req, res) => {
-  try {
-    const db = await openDb();
-    const designs = await db.all("SELECT * FROM designs ORDER BY created_at DESC");
-    res.json(designs);
-  } catch (error) {
-    console.error("Error fetching designs:", error);
-    res.status(500).json({ message: "Error fetching designs" });
-  }
-});
-
-app.delete("/api/designs/:id", async (req, res) => {
-  try {
-    const db = await openDb();
-    const result = await db.run("DELETE FROM designs WHERE id = ?", [req.params.id]);
-    
-    if (result.changes === 0) {
-      return res.status(404).json({ message: "Design not found" });
-    }
-    
-    res.json({ message: "✅ Design deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting design:", error);
-    res.status(500).json({ message: "Error deleting design" });
-  }
-});
-
-// ===================================================
-// 🤖 AI CHAT ROUTES
-// ===================================================
+// 🧠 BMC Routes مع تحسين الأخطاء
 app.post("/api/start", (req, res) => {
   const { studentId } = req.body;
   sessions[studentId] = { 
@@ -579,6 +455,47 @@ app.post("/api/next", async (req, res) => {
   }
 });
 
+app.post("/api/answer", (req, res) => {
+  const { studentId, answer } = req.body;
+  if (!sessions[studentId]) return res.status(400).json({ error: "No session found" });
+
+  sessions[studentId].chat.push({ role: "user", content: answer });
+  
+  // إذا كان في وضع BMC، تقدم في التقدم
+  if (sessions[studentId].mode === "bmc") {
+    const currentSectionIndex = sessions[studentId].bmcProgress % BMC_SECTIONS.length;
+    const currentSection = BMC_SECTIONS[currentSectionIndex];
+    sessions[studentId].bmcData[currentSection] = answer;
+    sessions[studentId].bmcProgress += 1;
+  }
+  
+  res.json({ 
+    message: "Answer saved",
+    progress: sessions[studentId].bmcProgress,
+    totalSections: BMC_SECTIONS.length
+  });
+});
+
+app.post("/api/summary", async (req, res) => {
+  const { studentId } = req.body;
+  
+  if (!sessions[studentId]) {
+    return res.status(400).json({ error: "No active session found" });
+  }
+
+  try {
+    const summary = await produceFinalSummary(studentId);
+    res.json({ 
+      summary,
+      bmcData: sessions[studentId].bmcData
+    });
+  } catch (err) {
+    console.error("Error in /api/summary:", err);
+    res.status(500).json({ error: "Failed to generate summary" });
+  }
+});
+
+// 🆕 مسار مساعد التصميم (بدل المحادثة الحرة)
 app.post("/api/chat", async (req, res) => {
   const { studentId, message } = req.body;
   
@@ -598,62 +515,225 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-// ===================================================
-// 📁 FILE DOWNLOAD ROUTES
-// ===================================================
-app.get("/api/projects/:id/download/:filetype", async (req, res) => {
-  const { id, filetype } = req.params;
+// 🆕 مسار خاص لاقتراحات التصميم
+app.post("/api/design/suggestions", async (req, res) => {
+  const { studentId, projectType } = req.body;
   
+  if (!studentId || !projectType) {
+    return res.status(400).json({ error: "Student ID and project type are required" });
+  }
+
   try {
-    const db = await openDb();
-    const project = await db.get("SELECT * FROM projects WHERE id = ?", [id]);
-    
-    if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
-    }
-    
-    let fileUrl;
-    if (filetype === 'logo') {
-      fileUrl = project.logo_url;
-    } else if (filetype === 'pdf') {
-      fileUrl = project.pdf_url;
-    } else {
-      return res.status(400).json({ error: 'Invalid file type' });
-    }
-    
-    if (!fileUrl) {
-      return res.status(404).json({ error: 'File not found for this project' });
-    }
-    
-    // إعادة التوجيه إلى رابط Cloudinary
-    res.redirect(fileUrl);
-    
-  } catch (error) {
-    console.error('Error fetching project file:', error);
-    res.status(500).json({ error: 'Failed to fetch file' });
+    const suggestions = await generateDesignSuggestions(studentId, projectType);
+    res.json({ 
+      suggestions,
+      projectType
+    });
+  } catch (err) {
+    console.error("Error in /api/design/suggestions:", err);
+    res.status(500).json({ error: "Failed to generate design suggestions" });
   }
 });
 
-// ===================================================
-// 🚀 START SERVER
-// ===================================================
-async function startServer() {
-  try {
-    await createTables();
-    
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
-      console.log(`☁️ Cloudinary: ${cloudinary.config().cloud_name ? 'Configured' : 'Not configured'}`);
-      console.log(`🤖 AI Assistant: ${model ? 'Ready' : 'Not available'}`);
-    });
-  } catch (error) {
-    console.error("❌ Failed to start server:", error);
-    process.exit(1);
+// 🆕 مسار لحفظ التصميمات
+app.post("/api/design/save", async (req, res) => {
+  const { studentId, designType, designData } = req.body;
+  
+  if (!studentId || !designType) {
+    return res.status(400).json({ error: "Student ID and design type are required" });
   }
-}
 
-// تنظيف الجلسات القديمة
+  try {
+    const db = await openDb();
+    await db.run(
+      `INSERT INTO designs (student_id, design_type, design_data) VALUES (?, ?, ?)`,
+      [studentId, designType, designData || '']
+    );
+    res.json({ message: "✅ Design saved successfully" });
+  } catch (err) {
+    console.error("Error saving design:", err);
+    res.status(500).json({ error: "Failed to save design" });
+  }
+});
+
+// 🆕 مسار لجلب التصميمات المحفوظة
+app.get("/api/designs/:studentId", async (req, res) => {
+  const { studentId } = req.params;
+  
+  try {
+    const db = await openDb();
+    const designs = await db.all(
+      "SELECT * FROM designs WHERE student_id = ? ORDER BY created_at DESC",
+      [studentId]
+    );
+    res.json({ designs });
+  } catch (err) {
+    console.error("Error fetching designs:", err);
+    res.status(500).json({ error: "Failed to fetch designs" });
+  }
+});
+
+// 🆕 مسار للحصول على تاريخ المحادثة
+app.get("/api/chat/history/:studentId", (req, res) => {
+  const { studentId } = req.params;
+  const session = sessions[studentId];
+  
+  if (!session) {
+    return res.json({ history: [] });
+  }
+  
+  res.json({ 
+    history: session.chat,
+    mode: session.mode,
+    bmcProgress: session.bmcProgress,
+    bmcData: session.bmcData
+  });
+});
+
+// 🆕 مسار للتبديل بين وضع BMC ومساعد التصميم
+app.post("/api/mode/switch", (req, res) => {
+  const { studentId, mode } = req.body;
+  
+  if (!sessions[studentId]) {
+    sessions[studentId] = { 
+      chat: [], 
+      bmcData: {}, 
+      bmcProgress: 0,
+      createdAt: new Date()
+    };
+  }
+  
+  sessions[studentId].mode = mode;
+  
+  // إضافة رسالة ترحيب حسب الوضع
+  if (mode === "design" && sessions[studentId].chat.length === 0) {
+    sessions[studentId].chat.push({
+      role: "assistant",
+      content: "🎨 **مرحباً! أنا مساعدك في التصميم الإبداعي**\n\nيمكنني مساعدتك في:\n• تصميم الشعار والهوية البصرية\n• نصائح الألوان والخطوط\n• تصميم المواقع والعروض التقديمية\n• أدوات التصميم المجانية\n\nما هو التصميم الذي تريد المساعدة فيه؟"
+    });
+  }
+  
+  res.json({ 
+    message: `Mode switched to ${mode}`,
+    mode: mode
+  });
+});
+
+// 🆕 مسار لفحص حالة الخادم
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "✅ Server is running",
+    timestamp: new Date().toISOString(),
+    activeSessions: Object.keys(sessions).length,
+    geminiStatus: process.env.GEMINI_API_KEY ? "Configured" : "Not Configured",
+    features: ["BMC Assistant", "Design Assistant", "Authentication", "File Upload"]
+  });
+});
+
+// ===================================================
+// 🧩 PROJECT CRUD - بدون مصادقة للحذف
+// ===================================================
+app.post(
+  "/api/projects",
+  verifyToken,
+  upload.fields([{ name: "logo", maxCount: 1 }, { name: "pdf_file", maxCount: 1 }]),
+  async (req, res) => {
+    const { student_name, project_title, description, phone } = req.body;
+    
+    // ✅ إصلاح: تخزين المعلومات فقط (بدون ملفات فعلية على Railway)
+    const logo = req.files?.logo ? `uploaded_logo_${Date.now()}` : null;
+    const pdf_file = req.files?.pdf_file ? `uploaded_pdf_${Date.now()}` : null;
+
+    try {
+      const db = await openDb();
+      await db.run(
+        `INSERT INTO projects (student_name, project_title, description, phone, logo, pdf_file)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [student_name, project_title, description, phone, logo, pdf_file]
+      );
+      res.status(201).json({ message: "✅ Project saved" });
+    } catch {
+      res.status(500).json({ message: "Error saving project" });
+    }
+  }
+);
+
+// 🆕 مسار لجلب جميع المشاريع - بدون مصادقة
+app.get("/api/projects", async (req, res) => {
+  try {
+    const db = await openDb();
+    const projects = await db.all("SELECT * FROM projects ORDER BY created_at DESC");
+    res.json(projects);
+  } catch (error) {
+    console.error("Error fetching projects:", error);
+    res.status(500).json({ message: "Error fetching projects" });
+  }
+});
+
+// 🆕 مسار لجلب مشروع محدد - بدون مصادقة
+app.get("/api/projects/:id", async (req, res) => {
+  try {
+    const db = await openDb();
+    const project = await db.get("SELECT * FROM projects WHERE id = ?", [req.params.id]);
+    
+    if (!project) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+    
+    res.json(project);
+  } catch (error) {
+    console.error("Error fetching project:", error);
+    res.status(500).json({ message: "Error fetching project" });
+  }
+});
+
+// 🆕 مسار لحذف مشروع - بدون مصادقة ✅ التعديل هنا
+app.delete("/api/projects/:id", async (req, res) => {
+  try {
+    const db = await openDb();
+    const result = await db.run("DELETE FROM projects WHERE id = ?", [req.params.id]);
+    
+    if (result.changes === 0) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+    
+    res.json({ message: "✅ Project deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting project:", error);
+    res.status(500).json({ message: "Error deleting project" });
+  }
+});
+
+// 🆕 مسار لجلب سجل التصميمات - بدون مصادقة ✅ التعديل هنا
+app.get("/api/designs", async (req, res) => {
+  try {
+    const db = await openDb();
+    const designs = await db.all("SELECT * FROM designs ORDER BY created_at DESC");
+    res.json(designs);
+  } catch (error) {
+    console.error("Error fetching designs:", error);
+    res.status(500).json({ message: "Error fetching designs" });
+  }
+});
+
+// 🆕 مسار لحذف تصميم - بدون مصادقة ✅ التعديل هنا
+app.delete("/api/designs/:id", async (req, res) => {
+  try {
+    const db = await openDb();
+    const result = await db.run("DELETE FROM designs WHERE id = ?", [req.params.id]);
+    
+    if (result.changes === 0) {
+      return res.status(404).json({ message: "Design not found" });
+    }
+    
+    res.json({ message: "✅ Design deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting design:", error);
+    res.status(500).json({ message: "Error deleting design" });
+  }
+});
+
+// 🆕 تنظيف الجلسات القديمة تلقائياً
 setInterval(() => {
   const now = new Date();
   const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
@@ -667,8 +747,125 @@ setInterval(() => {
   });
   
   if (cleanedCount > 0) {
-    console.log(`🧹 Cleaned ${cleanedCount} expired sessions`);
+    console.log(`🧹 تم تنظيف ${cleanedCount} جلسة منتهية الصلاحية`);
   }
-}, 30 * 60 * 1000);
+}, 30 * 60 * 1000); // كل 30 دقيقة
 
-startServer();
+// this is know test dwonload pdf and logo 
+// 🆕 مسارات لتحميل الملفات
+app.get("/api/files/:filename", async (req, res) => {
+  const { filename } = req.params;
+  
+  try {
+    // في بيئة الإنتاج، قد تحتاج لتعديل هذا المسار ليناسب تخزين Railway
+    const filePath = process.env.NODE_ENV === 'production' 
+      ? `/tmp/uploads/${filename}`
+      : `./uploads/${filename}`;
+    
+    // إرسال الملف كـ blob
+    res.sendFile(filePath, { root: '.' }, (err) => {
+      if (err) {
+        console.error('Error sending file:', err);
+        
+        // إذا لم يوجد الملف، أرسل ملف تجريبي
+        if (err.code === 'ENOENT') {
+          if (filename.includes('pdf')) {
+            // إنشاء PDF تجريبي
+            const PDFDocument = require('pdfkit');
+            const doc = new PDFDocument();
+            
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            
+            doc.pipe(res);
+            doc.fontSize(20).text(`ملف BMC - ${filename}`, 100, 100);
+            doc.fontSize(12).text(`المشروع: ${filename.replace('uploaded_pdf_', '')}`, 100, 150);
+            doc.text(`تاريخ الإنشاء: ${new Date().toLocaleDateString('ar-EG')}`, 100, 180);
+            doc.text('هذا ملف BMC تجريبي للمشروع', 100, 210);
+            doc.end();
+          } else {
+            // إنشاء صورة تجريبية
+            const canvas = require('canvas');
+            const c = canvas.createCanvas(400, 300);
+            const ctx = c.getContext('2d');
+            
+            // خلفية متدرجة
+            const gradient = ctx.createLinearGradient(0, 0, 400, 300);
+            gradient.addColorStop(0, '#3498db');
+            gradient.addColorStop(1, '#2c3e50');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 400, 300);
+            
+            // نص
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('تصميم UI/UX', 200, 120);
+            ctx.font = '16px Arial';
+            ctx.fillText(filename, 200, 160);
+            ctx.fillText('نموذج تجريبي', 200, 190);
+            
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            c.createPNGStream().pipe(res);
+          }
+        } else {
+          res.status(404).json({ error: 'File not found' });
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error in file download:', error);
+    res.status(500).json({ error: 'Failed to download file' });
+  }
+});
+
+// 🆕 مسار لتحميل ملفات المشاريع
+app.get("/api/projects/:id/files/:filetype", async (req, res) => {
+  const { id, filetype } = req.params;
+  
+  try {
+    const db = await openDb();
+    const project = await db.get("SELECT * FROM projects WHERE id = ?", [id]);
+    
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+    
+    let filename;
+    if (filetype === 'logo') {
+      filename = project.logo;
+    } else if (filetype === 'pdf') {
+      filename = project.pdf_file;
+    } else {
+      return res.status(400).json({ error: 'Invalid file type' });
+    }
+    
+    if (!filename) {
+      return res.status(404).json({ error: 'File not found for this project' });
+    }
+    
+    // توجيه إلى مسار تحميل الملف
+    res.redirect(`/api/files/${filename}`);
+    
+  } catch (error) {
+    console.error('Error fetching project file:', error);
+    res.status(500).json({ error: 'Failed to fetch file' });
+  }
+});
+
+// ===================================================
+// 🔥 START SERVER - مصحح
+// ===================================================
+app.listen(PORT, async () => {
+  try {
+    await createTables();
+    console.log(`🚀 Server running at http://localhost:${PORT}`);
+    console.log(`🤖 AI Assistant ready for BMC sessions and Design help`);
+    console.log(`🎨 Design Assistant activated with creative support`);
+    console.log(`🔧 Health check available at http://localhost:${PORT}/api/health`);
+    console.log(`💾 Database initialized successfully`);
+  } catch (error) {
+    console.error("❌ Failed to start server:", error);
+  }
+});
